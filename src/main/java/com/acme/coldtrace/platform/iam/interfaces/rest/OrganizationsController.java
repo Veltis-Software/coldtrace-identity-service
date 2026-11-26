@@ -40,6 +40,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 @RequestMapping(value = "/api/v1/organizations", produces = APPLICATION_JSON_VALUE)
 @Tag(name = "Organizations", description = "Endpoints for organizations")
 public class OrganizationsController {
+    private final TenantAccess tenantAccess;
     private final OrganizationCommandService organizationCommandService;
     private final OrganizationQueryService organizationQueryService;
     private final MessageSource messageSource;
@@ -47,11 +48,13 @@ public class OrganizationsController {
     public OrganizationsController(
             OrganizationCommandService organizationCommandService,
             OrganizationQueryService organizationQueryService,
-            MessageSource messageSource
+            MessageSource messageSource,
+            TenantAccess tenantAccess
     ) {
         this.organizationCommandService = organizationCommandService;
         this.organizationQueryService = organizationQueryService;
         this.messageSource = messageSource;
+        this.tenantAccess = tenantAccess;
     }
 
     /**
@@ -59,16 +62,18 @@ public class OrganizationsController {
      *
      * @return response entity containing organization resources
      */
-    @Operation(summary = "Get all organizations", description = "Gets the organizations registered in the platform")
+    @Operation(summary = "Get the authenticated organization", description = "Lists organizations visible to the authenticated user")
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Organizations found",
                     content = @Content(array = @ArraySchema(schema = @Schema(implementation = OrganizationResource.class))))
     })
     @GetMapping
-    public ResponseEntity<?> getAllOrganizations() {
+    public ResponseEntity<?> getAllOrganizations(org.springframework.security.core.Authentication authentication) {
+        var organizationId = tenantAccess.session(authentication).organizationId();
         log.debug("GET /organizations");
         var organizations = organizationQueryService.handle(new GetAllOrganizationsQuery());
-        return ResponseEntityFromOrganizationQueryResultAssembler.toResponseEntityFromList(organizations);
+        return ResponseEntityFromOrganizationQueryResultAssembler.toResponseEntityFromList(
+                organizations.stream().filter(organization -> organizationId.equals(organization.getId())).toList());
     }
 
     /**
@@ -93,7 +98,11 @@ public class OrganizationsController {
                     content = @Content(schema = @Schema(implementation = ProblemDetail.class)))
     })
     @PostMapping
-    public ResponseEntity<?> createOrganization(@Valid @RequestBody CreateOrganizationResource resource) {
+    public ResponseEntity<?> createOrganization(@Valid @RequestBody CreateOrganizationResource resource,
+            org.springframework.security.core.Authentication authentication) {
+        if (!tenantAccess.session(authentication).permissions().contains("administrators:manage")) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN);
+        }
         log.debug("POST /organizations - contactEmail={}", resource.contactEmail());
         var command = CreateOrganizationCommandFromResourceAssembler.toCommandFromResource(resource);
         var organization = organizationCommandService.handle(command);

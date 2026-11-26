@@ -46,6 +46,7 @@ import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 @RequestMapping(value = "/api/v1/organizations/{organizationId}/users", produces = APPLICATION_JSON_VALUE)
 @Tag(name = "Users", description = "Endpoints for users")
 public class UsersController {
+    private final TenantAccess tenantAccess;
     private final UserCommandService userCommandService;
     private final UserQueryService userQueryService;
     private final MessageSource messageSource;
@@ -53,11 +54,13 @@ public class UsersController {
     public UsersController(
             UserCommandService userCommandService,
             UserQueryService userQueryService,
-            MessageSource messageSource
+            MessageSource messageSource,
+            TenantAccess tenantAccess
     ) {
         this.userCommandService = userCommandService;
         this.userQueryService = userQueryService;
         this.messageSource = messageSource;
+        this.tenantAccess = tenantAccess;
     }
 
     /**
@@ -78,7 +81,8 @@ public class UsersController {
     @GetMapping
     public ResponseEntity<?> getUsersByOrganizationId(
             @Parameter(name = "organizationId", description = "Organization identifier", required = true)
-            @PathVariable Long organizationId) {
+            @PathVariable Long organizationId, org.springframework.security.core.Authentication authentication) {
+        tenantAccess.requireOrganization(authentication, organizationId);
         log.debug("GET /organizations/{}/users", organizationId);
         var users = userQueryService.handle(new GetUsersByOrganizationIdQuery(organizationId));
         return ResponseEntityFromUserQueryResultAssembler.toResponseEntityFromList(users, messageSource);
@@ -111,7 +115,8 @@ public class UsersController {
     public ResponseEntity<?> createUser(
             @Parameter(name = "organizationId", description = "Organization identifier", required = true)
             @PathVariable Long organizationId,
-            @Valid @RequestBody CreateUserResource resource) {
+            @Valid @RequestBody CreateUserResource resource, org.springframework.security.core.Authentication authentication) {
+        tenantAccess.requireUserChange(authentication, organizationId, null, resource.roleId());
         log.debug("POST /organizations/{}/users - email={}, roleId={}",
                 organizationId, resource.email(), resource.roleId());
         var command = CreateUserCommandFromResourceAssembler.toCommandFromResource(resource, organizationId);
@@ -151,7 +156,8 @@ public class UsersController {
             @PathVariable Long organizationId,
             @Parameter(name = "userId", description = "User identifier", required = true)
             @PathVariable Long userId,
-            @Valid @RequestBody AssignUserRoleResource resource) {
+            @Valid @RequestBody AssignUserRoleResource resource, org.springframework.security.core.Authentication authentication) {
+        tenantAccess.requireUserChange(authentication, organizationId, userId, resource.roleId());
         log.debug("PATCH /organizations/{}/users/{}/role - roleId={}",
                 organizationId, userId, resource.roleId());
         var command = AssignUserRoleCommandFromResourceAssembler.toCommandFromResource(
@@ -189,7 +195,8 @@ public class UsersController {
             @Parameter(name = "organizationId", description = "Organization identifier", required = true)
             @PathVariable Long organizationId,
             @Parameter(name = "userId", description = "User identifier", required = true)
-            @PathVariable Long userId) {
+            @PathVariable Long userId, org.springframework.security.core.Authentication authentication) {
+        tenantAccess.requireUserChange(authentication, organizationId, userId, null);
         log.debug("DELETE /organizations/{}/users/{}", organizationId, userId);
         var result = userCommandService.handle(new DeleteUserCommand(organizationId, userId));
         return ResponseEntityFromUserCommandResultAssembler.toResponseEntityFromDeleteResult(
